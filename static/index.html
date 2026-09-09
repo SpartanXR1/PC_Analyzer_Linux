@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laptop Performance Analyzer - Linux</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/styles.css?v=8">
+</head>
+<body>
+    <div class="glow-bg"></div>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="logo-area">
+                <div class="logo-icon"><i class="fa-solid fa-laptop-medical"></i></div>
+                <div>
+                    <h1>Laptop Analyzer</h1>
+                    <p id="system-subtitle" class="subtitle">Optimizador & Recomendador para Linux</p>
+                </div>
+            </div>
+            <div class="header-actions" style="display: flex; gap: 0.75rem;">
+                <button id="language-btn" class="btn btn-outline" aria-label="Cambiar idioma">EN</button>
+                <button id="scan-btn" class="btn btn-primary btn-glow">
+                    <i class="fa-solid fa-sync fa-spin-hover"></i> <span data-i18n="scan">Analizar Sistema</span>
+                </button>
+                <button id="shutdown-btn" class="btn btn-outline" style="border-color: var(--danger); color: var(--danger);">
+                    <i class="fa-solid fa-power-off"></i> <span data-i18n="shutdown">Apagar</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard-grid">
+            
+            <!-- System Stats Grid -->
+            <section class="card stats-card col-span-3">
+                <h2><i class="fa-solid fa-microchip header-icon"></i> <span data-i18n="hardware">Hardware y Estado Actual</span></h2>
+                <div class="stats-grid">
+                    <!-- CPU Card -->
+                    <div class="stat-subcard">
+                        <div class="stat-icon cpu-theme"><i class="fa-solid fa-cpu"></i></div>
+                        <div class="stat-details">
+                            <h3 data-i18n="cpu">CPU</h3>
+                            <p id="cpu-model" class="stat-value">Cargando...</p>
+                            <div class="stat-meta">
+                                <span><i class="fa-solid fa-gauge-high"></i> <span data-i18n="driver">Driver</span>: <strong id="cpu-driver">-</strong></span>
+                                <span><i class="fa-solid fa-sliders"></i> <span data-i18n="governor">Gobernador</span>: <strong id="cpu-gov">-</strong></span>
+                                <span><i class="fa-solid fa-temperature-half"></i> <span data-i18n="temperature">Temperatura</span>: <strong id="cpu-temp">-</strong></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GPU Card -->
+                    <div class="stat-subcard">
+                        <div class="stat-icon gpu-theme"><i class="fa-solid fa-vr-cardboard"></i></div>
+                        <div class="stat-details">
+                            <h3 data-i18n="graphics">Gráficos (GPU)</h3>
+                            <div id="gpu-container">
+                                <p class="stat-value">Cargando...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Battery Card -->
+                    <div class="stat-subcard">
+                        <div class="stat-icon bat-theme"><i class="fa-solid fa-battery-three-quarters"></i></div>
+                        <div class="stat-details">
+                            <h3 data-i18n="battery">Batería</h3>
+                            <p id="bat-status" class="stat-value">Cargando...</p>
+                            <div class="stat-meta">
+                                <span><span data-i18n="charge">Carga</span>: <strong id="bat-charge">-</strong></span>
+                                <span><span data-i18n="health">Salud</span>: <strong id="bat-health">-</strong></span>
+                                <span><span data-i18n="power">Consumo</span>: <strong id="bat-draw">-</strong></span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div id="bat-progress" class="progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RAM Card -->
+                    <div class="stat-subcard">
+                        <div class="stat-icon ram-theme"><i class="fa-solid fa-memory"></i></div>
+                        <div class="stat-details">
+                            <h3 data-i18n="memory">Memoria RAM</h3>
+                            <p id="ram-status" class="stat-value">Cargando...</p>
+                            <div class="stat-meta">
+                                <span><span data-i18n="ramUsed">En uso</span>: <strong id="ram-used">-</strong></span>
+                                <span><span data-i18n="ramAvailable">Disponible</span>: <strong id="ram-available">-</strong></span>
+                                <span><span data-i18n="swap">Swap</span>: <strong id="swap-status">-</strong></span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div id="ram-progress" class="progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Live Monitor -->
+            <section class="card col-span-3">
+                <h2><i class="fa-solid fa-chart-line header-icon icon-info"></i> <span data-i18n="liveMonitor">Monitoreo en Vivo</span></h2>
+                <div class="live-grid">
+                    <div class="live-item">
+                        <h3><i class="fa-solid fa-microchip"></i> <span data-i18n="cpu">CPU</span></h3>
+                        <div class="live-value-wrap">
+                            <span id="live-cpu" class="live-value">0%</span>
+                            <div class="progress-bar-container"><div id="live-cpu-bar" class="progress-bar" style="width: 0%"></div></div>
+                        </div>
+                        <canvas id="cpu-chart" class="live-canvas" width="360" height="56"></canvas>
+                    </div>
+                    <div class="live-item">
+                        <h3><i class="fa-solid fa-memory"></i> <span data-i18n="memory">Memoria RAM</span></h3>
+                        <div class="live-value-wrap">
+                            <span id="live-ram" class="live-value">0%</span>
+                            <div class="progress-bar-container"><div id="live-ram-bar" class="progress-bar" style="width: 0%"></div></div>
+                        </div>
+                        <canvas id="ram-chart" class="live-canvas" width="360" height="56"></canvas>
+                    </div>
+                    <div class="live-item">
+                        <h3><i class="fa-solid fa-hard-drive"></i> <span data-i18n="disk">Disco</span></h3>
+                        <div class="live-value-wrap">
+                            <span id="live-disk" class="live-value">0%</span>
+                            <div class="progress-bar-container"><div id="live-disk-bar" class="progress-bar" style="width: 0%"></div></div>
+                        </div>
+                        <p class="live-speed"><span class="speed-label"><i class="fa-solid fa-arrow-up" style="color: var(--danger);"></i> <span data-i18n="writeSpeed">Escritura</span></span> <strong id="live-write">0 B/s</strong> · <span class="speed-label"><i class="fa-solid fa-arrow-down" style="color: var(--success);"></i> <span data-i18n="readSpeed">Lectura</span></span> <strong id="live-read">0 B/s</strong></p>
+                    </div>
+                </div>
+                <div class="process-grid">
+                    <div class="process-panel">
+                        <h4><i class="fa-solid fa-fire" style="color: var(--warning);"></i> <span data-i18n="topCpu">Procesos por CPU</span></h4>
+                        <ul id="proc-cpu" class="process-list"></ul>
+                    </div>
+                    <div class="process-panel">
+                        <h4><i class="fa-solid fa-memory"></i> <span data-i18n="topMemory">Procesos por Memoria</span></h4>
+                        <ul id="proc-mem" class="process-list"></ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Disks & Storage -->
+            <section class="card col-span-3">
+                <h2><i class="fa-solid fa-hard-drive header-icon icon-info"></i> <span data-i18n="disks">Discos y Almacenamiento</span></h2>
+                <div class="disk-split">
+                    <div id="disks-list" class="flex-column gap-md">
+                        <div class="empty-state">
+                            <i class="fa-solid fa-hard-drive"></i>
+                            <p data-i18n="initialDisk">Analiza el sistema para ver los discos.</p>
+                        </div>
+                    </div>
+                    <div id="fs-usage" class="fs-usage"></div>
+                </div>
+            </section>
+
+            <!-- Issues & Diagnostics -->
+            <section class="card col-span-2">
+                <h2><i class="fa-solid fa-triangle-exclamation header-icon icon-warn"></i> <span data-i18n="diagnostics">Diagnósticos e Incidencias</span></h2>
+                <div id="issues-list" class="flex-column gap-md">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <p data-i18n="initialIssues">No se han encontrado problemas. Haz un escaneo para analizar tu sistema.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Packages / AUR recommendations -->
+            <section class="card">
+                <div class="section-heading">
+                    <h2><i class="fa-solid fa-cubes-stacked header-icon icon-info"></i> <span data-i18n="packages">Paquetes Recomendados</span></h2>
+                    <button id="install-recommendations-btn" class="btn btn-primary btn-sm" disabled>
+                        <i class="fa-solid fa-terminal"></i> <span data-i18n="install">Instalar</span>
+                    </button>
+                </div>
+                <div id="recs-list" class="flex-column gap-md">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-box-open"></i>
+                        <p data-i18n="initialPackages">No hay recomendaciones de paquetes actualmente.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Cache and residual files cleanup -->
+            <section class="card col-span-3">
+                <div class="section-heading">
+                    <h2><i class="fa-solid fa-broom header-icon icon-info"></i> <span data-i18n="maintenance">Mantenimiento y Limpieza</span></h2>
+                    <button id="cleanup-btn" class="btn btn-primary btn-sm">
+                        <i class="fa-solid fa-terminal"></i> <span data-i18n="cleanupAction">Ejecutar Limpieza</span>
+                    </button>
+                </div>
+                <p class="section-note" data-i18n="maintenanceNote">Acciones manuales para liberar caché y conservar el sistema ágil. No se ejecuta nada automáticamente.</p>
+                <div id="cleanup-list" class="flex-column gap-md">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-broom"></i>
+                        <p data-i18n="initialCleanup">Analiza el sistema para revisar cachés y archivos residuales.</p>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Action Modal -->
+    <div id="output-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-terminal"></i> Ejecución de Comando</h3>
+                <button class="close-modal-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Ejecutando:</p>
+                <code id="executing-command">sudo &lt;gestor&gt; install package</code>
+                <pre id="command-output" class="terminal-box">Esperando salida del comando...</pre>
+            </div>
+        </div>
+    </div>
+
+    <div id="diagnostic-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="diagnostic-modal-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-stethoscope"></i> <span id="diagnostic-modal-title">Detalle del diagnóstico</span></h3>
+                <button id="close-diagnostic-modal" class="close-modal-btn" aria-label="Cerrar">&times;</button>
+            </div>
+            <div class="modal-body diagnostic-detail">
+                <span id="diagnostic-severity" class="badge badge-medium"></span>
+                <h4 id="diagnostic-title"></h4>
+                <p id="diagnostic-description"></p>
+                <h4 id="diagnostic-solution-label">Solución recomendada</h4>
+                <p id="diagnostic-fix"></p>
+                <div id="diagnostic-command-wrap">
+                    <h4 id="diagnostic-command-label">Comando sugerido</h4>
+                    <code id="diagnostic-command" class="terminal-box"></code>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=9"></script>
+</body>
+</html>
