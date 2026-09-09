@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=PC Analyzer Linux
-Comment=Analizador de rendimiento para Linux
-Exec=pc-analyzer
-Icon=pc-analyzer
-Terminal=false
-Categories=Utility;System;
