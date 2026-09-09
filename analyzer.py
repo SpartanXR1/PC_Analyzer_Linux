@@ -211,7 +211,7 @@ def get_cleanup_recommendations(package_manager):
 
 def launch_commands_terminal(commands, title):
     script_commands = [
-        f"echo {shlex.quote('Laptop Analyzer: ' + title)}",
+        f"echo {shlex.quote('PC Analyzer Linux: ' + title)}",
         *commands,
         "echo 'Proceso terminado.'",
         "read -r -p 'Presiona Enter para cerrar esta terminal...'",
@@ -243,7 +243,7 @@ def launch_cleanup_terminal(package_manager):
         "xbps": "sudo xbps-remove -O",
     }
     commands = [
-        "echo 'Laptop Analyzer: limpieza y mantenimiento del sistema'",
+        "echo 'PC Analyzer Linux: limpieza y mantenimiento del sistema'",
         "echo 'Cerrando caché de aplicaciones del usuario...'",
         "if [ -d ~/.cache ]; then find ~/.cache -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; fi",
     ]
@@ -273,7 +273,7 @@ def check_aur_packages(package_names):
         params = "&".join(f"arg[]={urllib.parse.quote(name)}" for name in chunk)
         url = f"https://aur.archlinux.org/rpc/?v=5&type=info&{params}"
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'LaptopAnalyzer/1.0'})
+            req = urllib.request.Request(url, headers={'User-Agent': 'PCAnalyzer/1.0'})
             with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read().decode())
             for result in data.get("results", []):

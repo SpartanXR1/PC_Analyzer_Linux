@@ -72,7 +72,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.querySelectorAll("[data-i18n]").forEach(element => {
             element.textContent = t(element.dataset.i18n);
         });
-        document.title = currentLanguage === "es" ? "Analizador de Portátil - Linux" : "Laptop Performance Analyzer - Linux";
+        document.title = "PC Analyzer - Linux";
         languageBtn.textContent = currentLanguage === "es" ? "EN" : "ES";
         languageBtn.setAttribute("aria-label", currentLanguage === "es" ? "Switch to English" : "Cambiar a español");
         document.getElementById("diagnostic-modal-title").textContent = t("detail");

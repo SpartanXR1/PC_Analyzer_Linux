@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('/home/spartan/Documentos/Area_de_Programacion/Proyectos/laptop_analyzer/static', 'static')]
+datas = [('/home/spartan/Documentos/Area_de_Programacion/Proyectos/laptop_analyzer/Version final/static', 'static')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('fastapi')
@@ -13,7 +13,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['/home/spartan/Documentos/Area_de_Programacion/Proyectos/laptop_analyzer/main.py'],
+    ['/home/spartan/Documentos/Area_de_Programacion/Proyectos/laptop_analyzer/Version final/main.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -32,7 +32,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='laptop-analyzer',
+    name='pc-analyzer',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -51,5 +51,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='laptop-analyzer',
+    name='pc-analyzer',
 )

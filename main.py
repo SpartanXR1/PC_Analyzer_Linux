@@ -9,7 +9,7 @@ import threading
 import webbrowser
 from analyzer import detect_package_manager, launch_cleanup_terminal, launch_commands_terminal, perform_scan, get_live_stats
 
-app = FastAPI(title="Laptop Performance Analyzer")
+app = FastAPI(title="PC Analyzer Linux")
 
 # Heartbeat tracking for auto-shutdown when browser closes
 last_heartbeat = time.time()
@@ -99,7 +99,7 @@ def get_index():
     if os.path.exists(index_file):
         with open(index_file, "r") as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Laptop Performance Analyzer</h1><p>Frontend assets are building...</p>")
+    return HTMLResponse(content="<h1>PC Analyzer Linux</h1><p>Frontend assets are building...</p>")
 
 app.mount("/static", StaticFiles(directory=static_path), name="static")
 
