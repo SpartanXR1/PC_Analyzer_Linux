@@ -5,6 +5,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const installRecommendationsBtn = document.getElementById("install-recommendations-btn");
     const languageBtn = document.getElementById("language-btn");
     const diagnosticModal = document.getElementById("diagnostic-modal");
+    const terminalModal = document.getElementById("terminal-modal");
+    const terminalBodyEl = document.getElementById("terminal-body");
+    const closeTerminalBtn = document.getElementById("close-terminal-modal");
     let currentLanguage = localStorage.getItem("laptop-analyzer-language") || "es";
 
     const translations = {
@@ -22,6 +25,11 @@ document.addEventListener("DOMContentLoaded", () => {
             solution: "Solución recomendada", command: "Comando sugerido", severityHigh: "alta", severityMedium: "media", severityLow: "baja",
             cleanupConfirm: "Se abrirá una terminal para limpiar la caché de usuario, del gestor de paquetes y logs antiguos. ¿Deseas continuar?",
             installConfirm: "Se abrirá una terminal para instalar todos los paquetes recomendados. ¿Deseas continuar?",
+            termConnecting: "Conectando a la terminal del sistema...",
+            termHint: "Ctrl+C para interrumpir · Esc para cerrar",
+            termFinished: "Proceso finalizado",
+            termExitCode: "código",
+            termError: "No se pudo abrir la terminal del sistema.",
             memory: "Memoria RAM", ramUsed: "En uso", ramAvailable: "Disponible", swap: "Swap",
             liveMonitor: "Monitoreo en Vivo", disk: "Disco", readSpeed: "Lectura", writeSpeed: "Escritura",
             topCpu: "Procesos por CPU", topMemory: "Procesos por Memoria",
@@ -42,6 +50,11 @@ document.addEventListener("DOMContentLoaded", () => {
             solution: "Recommended solution", command: "Suggested command", severityHigh: "high", severityMedium: "medium", severityLow: "low",
             cleanupConfirm: "A terminal will open to clean the user cache, package-manager cache, and old logs. Continue?",
             installConfirm: "A terminal will open to install all recommended packages. Continue?",
+            termConnecting: "Connecting to the system terminal...",
+            termHint: "Ctrl+C to interrupt · Esc to close",
+            termFinished: "Process finished",
+            termExitCode: "code",
+            termError: "Could not open the system terminal.",
             memory: "Memory (RAM)", ramUsed: "Used", ramAvailable: "Available", swap: "Swap",
             liveMonitor: "Live Monitor", disk: "Disk", readSpeed: "Read", writeSpeed: "Write",
             topCpu: "Top CPU processes", topMemory: "Top memory processes",
@@ -589,6 +602,105 @@ document.addEventListener("DOMContentLoaded", () => {
         return tr[status] || status;
     }
 
+    // ---------- Terminal Modal (real PTY terminal) ----------
+    let terminalInteractive = false;
+    let terminalEventSource = null;
+    let terminalOutputPre = null;
+
+    function openTerminalModal(title) {
+        document.getElementById("terminal-modal-title").textContent = title;
+        terminalModal.style.display = "flex";
+    }
+
+    function closeTerminalModal() {
+        stopTerminalStream();
+        fetch("/api/terminal/stop", { method: "POST" }).catch(() => {});
+        terminalBodyEl.innerHTML = "";
+        terminalOutputPre = null;
+        terminalModal.style.display = "none";
+    }
+
+    function appendTerminalStatus(html) {
+        const line = document.createElement("div");
+        line.className = "term-line";
+        line.innerHTML = html;
+        terminalBodyEl.appendChild(line);
+        terminalBodyEl.scrollTop = terminalBodyEl.scrollHeight;
+        return line;
+    }
+
+    function appendTerminalOutput(text) {
+        if (!terminalOutputPre) {
+            terminalOutputPre = document.createElement("pre");
+            terminalOutputPre.className = "term-pre";
+            terminalBodyEl.appendChild(terminalOutputPre);
+        }
+        terminalOutputPre.textContent += text;
+        terminalBodyEl.scrollTop = terminalBodyEl.scrollHeight;
+    }
+
+    function stopTerminalStream() {
+        terminalInteractive = false;
+        if (terminalEventSource) {
+            terminalEventSource.close();
+            terminalEventSource = null;
+        }
+    }
+
+    function connectTerminalStream() {
+        stopTerminalStream();
+        terminalInteractive = true;
+        terminalEventSource = new EventSource("/api/terminal/events");
+        terminalEventSource.onmessage = event => {
+            let msg;
+            try { msg = JSON.parse(event.data); } catch { return; }
+            if (msg.type === "output") {
+                appendTerminalOutput(msg.data);
+            } else if (msg.type === "exit") {
+                const code = msg.code;
+                stopTerminalStream();
+                const ok = code === 0;
+                appendTerminalStatus(`<span class="${ok ? "term-ok" : "term-error"}">${ok ? "✓" : "✗"} ${t("termFinished")} (${t("termExitCode")} ${code})</span>`);
+            }
+        };
+    }
+
+    function sendTerminalInput(data) {
+        fetch("/api/terminal/input", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data })
+        }).catch(() => {});
+    }
+
+    async function startTerminalRun(action) {
+        const isCleanup = action === "cleanup";
+        const btn = isCleanup ? cleanupBtn : installRecommendationsBtn;
+        if (!confirm(t(isCleanup ? "cleanupConfirm" : "installConfirm"))) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Preparando...';
+        try {
+            const res = await fetch("/api/terminal/start", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "No se pudo iniciar la terminal");
+
+            openTerminalModal(data.title);
+            document.getElementById("terminal-footer-hint").textContent = t("termHint");
+            appendTerminalStatus(`<span class="term-muted"># ${t("termConnecting")}</span>`);
+            connectTerminalStream();
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-terminal"></i> ${t(isCleanup ? "cleanupAction" : "install")}`;
+        }
+    }
+
     // Manual shutdown action
     shutdownBtn.addEventListener("click", async () => {
         if (confirm(currentLanguage === "es" ? "¿Estás seguro de que deseas apagar el analizador? Esto detendrá el servidor backend." : "Are you sure you want to stop the analyzer? This will stop the backend server.")) {
@@ -607,54 +719,41 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    cleanupBtn.addEventListener("click", async () => {
-        const confirmed = confirm(t("cleanupConfirm"));
-        if (!confirmed) return;
+    cleanupBtn.addEventListener("click", () => startTerminalRun("cleanup"));
 
-        cleanupBtn.disabled = true;
-        cleanupBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Abriendo terminal...';
-        try {
-            const res = await fetch("/api/cleanup", { method: "POST" });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "No se pudo abrir la terminal");
-            cleanupBtn.innerHTML = '<i class="fa-solid fa-check"></i> Terminal abierta';
-            setTimeout(() => {
-                cleanupBtn.innerHTML = `<i class="fa-solid fa-terminal"></i> ${t("cleanupAction")}`;
-                cleanupBtn.disabled = false;
-            }, 2500);
-        } catch (error) {
-            cleanupBtn.disabled = false;
-            cleanupBtn.innerHTML = `<i class="fa-solid fa-terminal"></i> ${t("cleanupAction")}`;
-            alert(error.message);
-        }
-    });
-
-    installRecommendationsBtn.addEventListener("click", async () => {
-        if (!confirm(t("installConfirm"))) return;
-
-        installRecommendationsBtn.disabled = true;
-        installRecommendationsBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Preparando...';
-        try {
-            const res = await fetch("/api/install-recommendations", { method: "POST" });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "No se pudieron instalar los paquetes");
-            installRecommendationsBtn.innerHTML = `<i class="fa-solid fa-check"></i> ${data.count} comando(s) enviado(s)`;
-            setTimeout(() => {
-                installRecommendationsBtn.innerHTML = '<i class="fa-solid fa-terminal"></i> Instalar';
-                installRecommendationsBtn.disabled = false;
-            }, 3000);
-        } catch (error) {
-            installRecommendationsBtn.innerHTML = '<i class="fa-solid fa-terminal"></i> Instalar';
-            installRecommendationsBtn.disabled = false;
-            alert(error.message);
-        }
-    });
+    installRecommendationsBtn.addEventListener("click", () => startTerminalRun("install"));
 
     document.getElementById("close-diagnostic-modal").addEventListener("click", closeDiagnosticModal);
     diagnosticModal.addEventListener("click", event => {
         if (event.target === diagnosticModal) closeDiagnosticModal();
     });
+    closeTerminalBtn.addEventListener("click", closeTerminalModal);
+    terminalModal.addEventListener("click", event => {
+        if (event.target === terminalModal) closeTerminalModal();
+    });
     document.addEventListener("keydown", event => {
+        if (terminalModal.style.display === "flex") {
+            if (event.key === "Escape") {
+                closeTerminalModal();
+                return;
+            }
+            if (!terminalInteractive || event.isComposing) return;
+            let data = null;
+            if (event.ctrlKey && event.key.toLowerCase() === "c") {
+                data = "\x03";
+            } else if (event.key === "Enter") {
+                data = "\r";
+            } else if (event.key === "Backspace") {
+                data = "\x7f";
+            } else if (!event.ctrlKey && !event.altKey && event.key.length === 1) {
+                data = event.key;
+            } else {
+                return; // leave browser shortcuts (Ctrl+R, etc.) alone
+            }
+            event.preventDefault();
+            sendTerminalInput(data);
+            return;
+        }
         if (event.key === "Escape") closeDiagnosticModal();
     });
 

@@ -1,13 +1,16 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
+import json
 import os
+import queue
 import signal
 import sys
 import time
 import threading
 import webbrowser
-from analyzer import detect_package_manager, launch_cleanup_terminal, launch_commands_terminal, perform_scan, get_live_stats
+from analyzer import detect_package_manager, launch_cleanup_terminal, launch_commands_terminal, perform_scan, get_live_stats, get_cleanup_commands
+from terminal_session import start_session, get_active_session, stop_active_session
 
 app = FastAPI(title="PC Analyzer Linux")
 
@@ -51,15 +54,26 @@ def api_cleanup():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def get_install_commands():
+    """Install commands currently recommended (deduplicated, in order)."""
+    recommendations = perform_scan().get("recommendations", [])
+    return list(dict.fromkeys(
+        recommendation["install_cmd"]
+        for recommendation in recommendations
+        if recommendation.get("install_cmd")
+    ))
+
+
+@app.get("/api/commands")
+def api_commands(action: str = ""):
+    """Deprecated: kept for reference. Use /api/terminal/start instead."""
+    raise HTTPException(status_code=410, detail="Este endpoint ya no se usa. Usa /api/terminal/start.")
+
+
 @app.post("/api/install-recommendations")
 def api_install_recommendations():
     try:
-        recommendations = perform_scan().get("recommendations", [])
-        commands = list(dict.fromkeys(
-            recommendation["install_cmd"]
-            for recommendation in recommendations
-            if recommendation.get("install_cmd")
-        ))
+        commands = get_install_commands()
         if not commands:
             raise HTTPException(status_code=404, detail="No hay paquetes disponibles para instalar.")
         if not launch_commands_terminal(commands, "instalación de paquetes recomendados"):
@@ -69,6 +83,84 @@ def api_install_recommendations():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- In-app terminal (PTY) ----------
+
+@app.post("/api/terminal/start")
+def api_terminal_start(payload: dict):
+    action = (payload.get("action") or "").strip().lower()
+    if action == "cleanup":
+        commands = get_cleanup_commands(detect_package_manager())
+        title = "Limpieza y mantenimiento del sistema"
+        if not commands:
+            raise HTTPException(status_code=404, detail="No hay comandos disponibles para esta acción.")
+    elif action == "install":
+        commands = get_install_commands()
+        title = "Instalación de paquetes recomendados"
+        if not commands:
+            raise HTTPException(status_code=404, detail="No hay paquetes disponibles para instalar.")
+    else:
+        raise HTTPException(status_code=400, detail="Acción no válida. Usa 'cleanup' o 'install'.")
+    session = start_session(commands, title)
+    return {"id": session.id, "title": session.title, "count": len(commands)}
+
+
+@app.get("/api/terminal/events")
+def api_terminal_events():
+    session = get_active_session()
+    if session is None:
+        raise HTTPException(status_code=404, detail="No hay sesión de terminal activa.")
+
+    def _encode(kind, payload):
+        if kind == "exit":
+            return f"data: {json.dumps({'type': 'exit', 'code': payload})}\n\n"
+        return f"data: {json.dumps({'type': 'output', 'data': payload})}\n\n"
+
+    def event_stream():
+        try:
+            while True:
+                if session.done:
+                    # Drain any remaining output, then finish.
+                    try:
+                        kind, payload = session.output_q.get_nowait()
+                        yield _encode(kind, payload)
+                        continue
+                    except queue.Empty:
+                        break
+                try:
+                    kind, payload = session.output_q.get(timeout=15)
+                except queue.Empty:
+                    yield ": ping\n\n"
+                    continue
+                yield _encode(kind, payload)
+                if kind == "exit":
+                    break
+        except GeneratorExit:
+            # Client disconnected (e.g. page reload); the session keeps running.
+            raise
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/terminal/input")
+def api_terminal_input(payload: dict):
+    session = get_active_session()
+    if session is None:
+        raise HTTPException(status_code=404, detail="No hay sesión de terminal activa.")
+    data = payload.get("data", "")
+    accepted = session.write_input(data)
+    return {"status": "ok" if accepted else "closed", "accepted": accepted}
+
+
+@app.post("/api/terminal/stop")
+def api_terminal_stop():
+    stop_active_session()
+    return {"status": "stopped"}
 
 @app.post("/api/heartbeat")
 def api_heartbeat():

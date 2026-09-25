@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/styles.css?v=8">
+    <link rel="stylesheet" href="/static/styles.css?v=12">
 </head>
 <body>
     <div class="glow-bg"></div>
@@ -203,17 +203,16 @@
         </main>
     </div>
 
-    <!-- Action Modal -->
-    <div id="output-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-terminal"></i> Ejecución de Comando</h3>
-                <button class="close-modal-btn">&times;</button>
+    <!-- Terminal Modal (real PTY terminal) -->
+    <div id="terminal-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="terminal-modal-title">
+        <div class="terminal-window">
+            <div class="terminal-header">
+                <span id="terminal-modal-title" class="terminal-header-title">pc-analyzer — bash</span>
+                <button id="close-terminal-modal" class="close-modal-btn" aria-label="Cerrar">&times;</button>
             </div>
-            <div class="modal-body">
-                <p>Ejecutando:</p>
-                <code id="executing-command">sudo &lt;gestor&gt; install package</code>
-                <pre id="command-output" class="terminal-box">Esperando salida del comando...</pre>
+            <div id="terminal-body" class="terminal-body" aria-live="polite"></div>
+            <div id="terminal-footer">
+                <span id="terminal-footer-hint" class="term-muted">Ctrl+C interrumpir · Esc cerrar</span>
             </div>
         </div>
     </div>
@@ -238,6 +237,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=9"></script>
+    <script src="/static/app.js?v=12"></script>
 </body>
 </html>

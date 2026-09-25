@@ -86,6 +86,36 @@ PACKAGE_NAME_ALIASES = {
 }
 
 
+# Packages that fulfil the same role and must NOT be suggested together:
+# installing more than one member of a group causes conflicts or is redundant.
+MUTUALLY_EXCLUSIVE_GROUPS = (
+    ("tlp", "power-profiles-daemon", "auto-cpufreq", "tuned-ppd"),  # power managers (conflict with each other)
+    ("yay", "paru"),                                   # AUR helpers (Arch, redundant)
+    ("intel-media-driver", "libva-intel-driver"),      # Intel VA-API drivers (per GPU generation)
+)
+
+# Desktop environments that integrate with power-profiles-daemon (GNOME/KDE and derivatives).
+POWER_PROFILES_DESKTOPS = {"gnome", "kde", "plasma", "budgie", "cinnamon"}
+
+# Preferred member of each group when none of its members is installed.
+# The power manager group is decided at runtime based on the desktop environment.
+DEFAULT_PREFERRED_GROUP_MEMBER = {
+    ("yay", "paru"): "yay",
+    ("intel-media-driver", "libva-intel-driver"): "intel-media-driver",
+}
+
+# Command that cleans the cache of each supported package manager
+PACKAGE_CACHE_CLEAN_COMMANDS = {
+    "apt": "sudo apt-get clean",
+    "pacman": "sudo pacman -Sc --noconfirm",
+    "dnf": "sudo dnf clean all",
+    "yum": "sudo yum clean all",
+    "zypper": "sudo zypper clean --all",
+    "apk": "sudo apk cache clean",
+    "xbps": "sudo xbps-remove -O",
+}
+
+
 def detect_package_manager():
     for manager in ("pacman", "apt", "dnf", "yum", "zypper", "apk", "xbps"):
         executable = "apt-get" if manager == "apt" else manager
@@ -181,20 +211,11 @@ def get_cleanup_recommendations(package_manager):
     }
     package_cache = package_cache_paths.get(package_manager)
     package_cache_size = get_directory_size(package_cache) if package_cache else 0
-    package_commands = {
-        "apt": "sudo apt-get clean",
-        "pacman": "sudo pacman -Sc --noconfirm",
-        "dnf": "sudo dnf clean all",
-        "yum": "sudo yum clean all",
-        "zypper": "sudo zypper clean --all",
-        "apk": "sudo apk cache clean",
-        "xbps": "sudo xbps-remove -O",
-    }
-    if package_cache_size and package_manager in package_commands:
+    if package_cache_size and package_manager in PACKAGE_CACHE_CLEAN_COMMANDS:
         recommendations.append({
             "title": "Caché del gestor de paquetes",
             "description": f"Ocupa aproximadamente {format_size(package_cache_size)} en {package_manager}.",
-            "command": package_commands[package_manager],
+            "command": PACKAGE_CACHE_CLEAN_COMMANDS[package_manager],
             "severity": "low"
         })
 
@@ -232,25 +253,26 @@ def launch_commands_terminal(commands, title):
     return False
 
 
+def get_cleanup_commands(package_manager):
+    """Action commands executed by the cleanup action (shown in the terminal modal)."""
+    commands = ["find ~/.cache -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"]
+    cache_command = PACKAGE_CACHE_CLEAN_COMMANDS.get(package_manager)
+    if cache_command:
+        commands.append(cache_command)
+    commands.append("sudo journalctl --vacuum-time=14d")
+    return commands
+
+
 def launch_cleanup_terminal(package_manager):
-    package_commands = {
-        "apt": "sudo apt-get clean",
-        "pacman": "sudo pacman -Sc --noconfirm",
-        "dnf": "sudo dnf clean all",
-        "yum": "sudo yum clean all",
-        "zypper": "sudo zypper clean --all",
-        "apk": "sudo apk cache clean",
-        "xbps": "sudo xbps-remove -O",
-    }
     commands = [
         "echo 'PC Analyzer Linux: limpieza y mantenimiento del sistema'",
         "echo 'Cerrando caché de aplicaciones del usuario...'",
         "if [ -d ~/.cache ]; then find ~/.cache -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; fi",
     ]
-    if package_manager in package_commands:
+    if package_manager in PACKAGE_CACHE_CLEAN_COMMANDS:
         commands.extend([
             f"echo 'Limpiando caché de {package_manager}...'",
-            package_commands[package_manager],
+            PACKAGE_CACHE_CLEAN_COMMANDS[package_manager],
         ])
     commands.extend([
         "echo 'Eliminando logs de systemd con más de 14 días...'",
@@ -700,6 +722,67 @@ def get_live_stats():
         "timestamp": time.time(),
     }
 
+def _desktop_environment_candidates():
+    # Tokens of the current desktop session (e.g. "ubuntu:GNOME" -> ["ubuntu", "gnome"])
+    candidates = []
+    for var in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION"):
+        value = os.environ.get(var)
+        if value:
+            candidates.extend(part.strip().lower() for part in value.split(":") if part.strip())
+    return candidates
+
+
+def detect_desktop_environment():
+    """Detect the active desktop environment, used to pick a compatible power manager."""
+    candidates = _desktop_environment_candidates()
+    for candidate in candidates:
+        # Prefer a known DE token: "ubuntu:GNOME" -> "gnome", "X-Cinnamon" -> "x-cinnamon"
+        for keyword in POWER_PROFILES_DESKTOPS:
+            if keyword in candidate:
+                return candidate
+    if candidates:
+        return candidates[0]
+    if shutil.which("pgrep"):
+        for proc in ("gnome-shell", "plasmashell", "xfce4-session", "cinnamon",
+                     "mate-session", "lxqt-session", "lxsession", "gnome-session"):
+            _, code = run_cmd(f"pgrep -x {proc} >/dev/null 2>&1")
+            if code == 0:
+                return proc
+    return None
+
+
+def desktop_uses_power_profiles(desktop=None):
+    """True if the desktop environment integrates with power-profiles-daemon."""
+    desktop = (desktop or "").lower()
+    return desktop in POWER_PROFILES_DESKTOPS or any(keyword in desktop for keyword in POWER_PROFILES_DESKTOPS)
+
+
+def preferred_group_member(group, desktop_environment=None):
+    """Pick the single member of a mutually exclusive group to suggest when
+    none of its members is installed."""
+    if "tlp" in group and "power-profiles-daemon" in group:
+        return "power-profiles-daemon" if desktop_uses_power_profiles(desktop_environment) else "tlp"
+    return DEFAULT_PREFERRED_GROUP_MEMBER.get(group)
+
+
+def select_group_suggestions(package_status, desktop_environment=None):
+    """Return the set of packages that must NOT be suggested because a member of
+    their mutually exclusive group is installed, or because a preferred member of
+    an empty group was chosen. Installed members are never suppressed."""
+    suppressed = set()
+    for group in MUTUALLY_EXCLUSIVE_GROUPS:
+        installed_members = [member for member in group if package_status.get(member, {}).get("installed")]
+        if installed_members:
+            # The group is already covered: suppress every other member.
+            suppressed.update(member for member in group if member not in installed_members)
+        else:
+            # Nothing installed: suggest only the preferred member of the group.
+            preferred = preferred_group_member(group, desktop_environment)
+            if preferred:
+                suppressed.update(member for member in group if member != preferred)
+    return suppressed
+
+
 def perform_scan():
     cpu = get_cpu_info()
     gpus = get_gpu_info()
@@ -713,6 +796,7 @@ def perform_scan():
         "tlp": "Power management tool for laptops",
         "power-profiles-daemon": "Power profiles handling over D-Bus (default in GNOME/KDE)",
         "auto-cpufreq": "Automatic CPU speed & power optimizer for Linux",
+        "tuned-ppd": "Power Profiles Daemon provider (tuned; integrates with GNOME/KDE)",
         "thermald": "Intel Thermal Daemon to prevent overheating",
         "powertop": "Analyze power consumption",
         "irqbalance": "Balances interrupts across CPU cores",
@@ -741,6 +825,10 @@ def perform_scan():
         for pkg in packages_to_check
     }
 
+    # Detect DE and compute which packages to suppress to avoid conflicts
+    desktop_environment = detect_desktop_environment()
+    suppressed_packages = select_group_suggestions(package_status, desktop_environment)
+
     # Analyze active configurations & issues
     issues = []
     recommendations = []
@@ -749,6 +837,7 @@ def perform_scan():
     has_power_daemon = package_status["power-profiles-daemon"]["installed"]
     has_tlp = package_status["tlp"]["installed"]
     has_auto_cpufreq = package_status["auto-cpufreq"]["installed"]
+    has_tuned_ppd = package_status["tuned-ppd"]["installed"]
 
     active_daemons = []
     services_to_check = []
@@ -758,10 +847,12 @@ def perform_scan():
         services_to_check.append("tlp")
     if has_auto_cpufreq:
         services_to_check.append("auto-cpufreq")
+    if has_tuned_ppd:
+        services_to_check.append("tuned-ppd")
     if package_status["thermald"]["installed"] and cpu["model"] and "intel" in cpu["model"].lower():
         services_to_check.append("thermald")
     service_status = check_services_status(services_to_check) if services_to_check else {}
-    power_services = [s for s in ("power-profiles-daemon", "tlp", "auto-cpufreq") if s in service_status]
+    power_services = [s for s in ("power-profiles-daemon", "tlp", "auto-cpufreq", "tuned-ppd") if s in service_status]
     active_daemons = [s for s in power_services if service_status[s]["active"]]
 
     if len(active_daemons) > 1:
@@ -769,14 +860,14 @@ def perform_scan():
             "severity": "high",
             "title": "Conflicting Power Management Daemons",
             "description": f"Multiple power managers are running: {', '.join(active_daemons)}. This can lead to conflicts, high power consumption, or unstable CPU scaling.",
-            "fix": "Disable or remove all but one power manager (e.g., keep auto-cpufreq or power-profiles-daemon, and disable/uninstall tlp)."
+            "fix": "Disable or remove all but one power manager (e.g., keep power-profiles-daemon or tuned-ppd, and disable/uninstall tlp)."
         })
     elif len(active_daemons) == 0:
         issues.append({
             "severity": "medium",
             "title": "No Power Management Daemon Active",
-            "description": "No power manager service (tlp, auto-cpufreq, or power-profiles-daemon) is active. Your battery life might be suboptimal.",
-            "fix": "Install and enable `auto-cpufreq` or `power-profiles-daemon`."
+            "description": "No power manager service (tlp, tuned-ppd, auto-cpufreq, or power-profiles-daemon) is active. Your battery life might be suboptimal.",
+            "fix": "Install and enable `power-profiles-daemon` or `tuned-ppd`."
         })
 
     # 2. SSD Trimming check
@@ -879,9 +970,7 @@ def perform_scan():
                 continue
             if pkg == "thermald" and (not cpu["model"] or "intel" not in cpu["model"].lower()):
                 continue
-            if pkg == "tlp" and has_power_daemon:
-                continue
-            if pkg == "power-profiles-daemon" and has_tlp:
+            if pkg in suppressed_packages:
                 continue
             if pkg in ["tlp", "power-profiles-daemon", "auto-cpufreq", "powertop"] and not battery["present"]:
                 continue
@@ -910,6 +999,7 @@ def perform_scan():
             "distribution": os_info["name"],
             "distribution_id": os_info["id"],
             "package_manager": package_manager or "not detected",
+            "desktop_environment": desktop_environment or "not detected",
         },
         "packages": package_status,
         "issues": issues,
