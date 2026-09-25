@@ -12,6 +12,7 @@ import os
 import pty
 import queue
 import select
+import shlex
 import signal
 import struct
 import subprocess
@@ -19,6 +20,16 @@ import termios
 import threading
 import time
 import uuid
+
+# A command can print a lot (a full journalctl dump, a verbose build). The queue
+# is bounded like a terminal's scrollback: when it fills up, the oldest pending
+# chunk is dropped instead of growing the process until the OOM killer steps in.
+OUTPUT_QUEUE_MAXSIZE = 2000
+
+# A session outlives its SSE client on purpose (page reload keeps the command
+# running). If nobody has drained the output for this long, the session is
+# orphaned and is stopped so it cannot keep producing into an unread queue.
+ORPHANED_SESSION_TIMEOUT = 300.0
 
 _active_session = None
 _lock = threading.Lock()
@@ -35,10 +46,12 @@ def _setup_tty():
 
 
 def _build_script(commands, title):
-    parts = [f"echo 'PC Analyzer Linux: {title}'"]
+    # The title is shell-interpolated, so it must be quoted: an unquoted
+    # apostrophe would let it break out of the echo and inject commands.
+    parts = [f"echo {shlex.quote('PC Analyzer Linux: ' + title)}"]
     for command in commands:
         if "'" not in command:
-            parts.append(f"echo '$ {command}'")
+            parts.append(f"echo {shlex.quote('$ ' + command)}")
         parts.append(command)
     return "\n".join(parts)
 
@@ -50,9 +63,32 @@ class TerminalSession:
         self.commands = list(commands)
         self.master_fd = None
         self.proc = None
-        self.output_q = queue.Queue()  # (kind, payload): ("out", str) | ("exit", int|None)
+        self.output_q = queue.Queue(maxsize=OUTPUT_QUEUE_MAXSIZE)
         self.done = False
         self.exit_code = None
+        self.last_drained_at = time.time()
+
+    # -- output queue ------------------------------------------------------
+
+    def _emit(self, item):
+        """Queue an item, discarding the oldest pending one when full."""
+        try:
+            self.output_q.put_nowait(item)
+        except queue.Full:
+            try:
+                self.output_q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self.output_q.put_nowait(item)
+            except queue.Full:
+                pass
+
+    def get_output(self, timeout):
+        """Consume one item and mark the session as still being watched."""
+        item = self.output_q.get(timeout=timeout)
+        self.last_drained_at = time.time()
+        return item
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -89,7 +125,7 @@ class TerminalSession:
                     break
                 if not data:
                     break
-                self.output_q.put(("out", data.decode("utf-8", "replace")))
+                self._emit(("out", data.decode("utf-8", "replace")))
         except Exception:
             pass
 
@@ -102,7 +138,13 @@ class TerminalSession:
         time.sleep(0.2)
         self.done = True
         self.exit_code = code
-        self.output_q.put(("exit", code))
+        self._emit(("exit", code))
+
+    def is_orphaned(self, now=None):
+        """True when nobody has read the output for a long time."""
+        if self.done:
+            return False
+        return (now or time.time()) - self.last_drained_at > ORPHANED_SESSION_TIMEOUT
 
     def write_input(self, data):
         if self.master_fd is None or self.done or self.proc is None or self.proc.poll() is not None:
@@ -136,7 +178,7 @@ class TerminalSession:
         if not self.done:
             self.done = True
             self.exit_code = None
-            self.output_q.put(("exit", None))
+            self._emit(("exit", None))
 
 
 def start_session(commands, title):

@@ -10,6 +10,29 @@ document.addEventListener("DOMContentLoaded", () => {
     const closeTerminalBtn = document.getElementById("close-terminal-modal");
     let currentLanguage = localStorage.getItem("laptop-analyzer-language") || "es";
 
+    // Per-process token injected by the server. A custom header cannot be sent
+    // cross-origin without a preflight, so this blocks other pages and DNS
+    // rebinding from driving the API (which can run shell commands).
+    const API_TOKEN = (document.querySelector('meta[name="pc-analyzer-token"]') || {}).content || "";
+    const TOKEN_HEADER = "X-PC-Analyzer-Token";
+
+    function apiFetch(path, options) {
+        const opts = Object.assign({}, options || {});
+        opts.headers = Object.assign({ [TOKEN_HEADER]: API_TOKEN }, opts.headers || {});
+        return fetch(path, opts);
+    }
+
+    // System-derived strings (disk models, mount points, package names, command
+    // text) must never be parsed as markup.
+    function esc(value) {
+        return String(value == null ? "" : value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
     const translations = {
         es: {
             scan: "Analizar Sistema", scanning: "Analizando...", shutdown: "Apagar", hardware: "Hardware y Estado Actual",
@@ -119,7 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Send heartbeat pings to the server
     function sendHeartbeat() {
-        fetch("/api/heartbeat", { method: "POST" }).catch(() => {
+        apiFetch("/api/heartbeat", { method: "POST" }).catch(() => {
             // Ignore connection errors if server is stopping
         });
     }
@@ -133,7 +156,7 @@ document.addEventListener("DOMContentLoaded", () => {
         scanBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${t("scanning")}`;
         
         try {
-            const res = await fetch("/api/scan");
+            const res = await apiFetch("/api/scan");
             if (!res.ok) throw new Error("Error al analizar el equipo");
             const data = await res.json();
             
@@ -167,7 +190,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const p = document.createElement("p");
                 p.className = "stat-value";
                 p.style.fontSize = "0.95rem";
-                p.innerHTML = `<i class="fa-solid fa-microchip"></i> ${gpu.name}`;
+                p.innerHTML = `<i class="fa-solid fa-microchip"></i> ${esc(gpu.name)}`;
                 gpuContainer.appendChild(p);
             });
         } else {
@@ -240,8 +263,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     <div class="disk-info">
                         <i class="fa-solid fa-hard-drive"></i>
                         <div>
-                            <h4>${disk.model}</h4>
-                            <p>/dev/${disk.name} · ${typeLabel} · ${formatBytes(disk.size)}</p>
+                            <h4>${esc(disk.model)}</h4>
+                            <p>/dev/${esc(disk.name)} · ${esc(typeLabel)} · ${formatBytes(disk.size)}</p>
                         </div>
                     </div>
                     ${healthBadge}
@@ -269,7 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 else if (pct > 70) barColor = "var(--warning)";
                 row.innerHTML = `
                     <div class="fs-row-header">
-                        <span class="fs-mount">${fs.mount}</span>
+                        <span class="fs-mount">${esc(fs.mount)}</span>
                         <span class="fs-meta">${formatBytes(fs.used)} / ${formatBytes(fs.total)} (${pct}% ${t("usedLabel")})</span>
                     </div>
                     <div class="progress-bar-container">
@@ -292,16 +315,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 
                 let btnHtml = "";
                 if (issue.fix_cmd) {
-                    btnHtml = `<button class="btn btn-primary btn-sm copy-action-btn" data-cmd="${issue.fix_cmd}"><i class="fa-solid fa-copy"></i> ${t("copy")}</button>`;
+                    btnHtml = `<button class="btn btn-primary btn-sm copy-action-btn" data-cmd="${esc(issue.fix_cmd)}"><i class="fa-solid fa-copy"></i> ${t("copy")}</button>`;
                 }
                 
                 item.innerHTML = `
                     <div class="issue-content">
                         <div class="issue-header">
                             <span class="badge badge-${issue.severity}">${t(`severity${issue.severity[0].toUpperCase()}${issue.severity.slice(1)}`)}</span>
-                            <span class="issue-title">${localizedIssue.title}</span>
+                            <span class="issue-title">${esc(localizedIssue.title)}</span>
                         </div>
-                        <p class="issue-desc">${localizedIssue.description}</p>
+                        <p class="issue-desc">${esc(localizedIssue.description)}</p>
                     </div>
                     ${btnHtml}
                 `;
@@ -342,12 +365,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 item.innerHTML = `
                     <div class="rec-info">
-                        <h4>${rec.package}</h4>
-                        <p>${rec.description}</p>
+                        <h4>${esc(rec.package)}</h4>
+                        <p>${esc(rec.description)}</p>
                     </div>
                     <div class="rec-actions">
                         ${sourceBadge}
-                        <button class="btn btn-outline btn-sm copy-action-btn" data-cmd="${rec.install_cmd}">
+                        <button class="btn btn-outline btn-sm copy-action-btn" data-cmd="${esc(rec.install_cmd)}">
                             <i class="fa-solid fa-copy"></i> ${t("copy")}
                         </button>
                     </div>
@@ -374,11 +397,11 @@ document.addEventListener("DOMContentLoaded", () => {
                     <div class="issue-content">
                         <div class="issue-header">
                             <span class="badge badge-${item.severity}">${item.severity}</span>
-                            <span class="issue-title">${item.title}</span>
+                            <span class="issue-title">${esc(item.title)}</span>
                         </div>
-                        <p class="issue-desc">${item.description}</p>
+                        <p class="issue-desc">${esc(item.description)}</p>
                     </div>
-                    <button class="btn btn-outline btn-sm copy-action-btn" data-cmd="${item.command}">
+                    <button class="btn btn-outline btn-sm copy-action-btn" data-cmd="${esc(item.command)}">
                         <i class="fa-solid fa-copy"></i> ${t("copy")}
                     </button>
                 `;
@@ -512,22 +535,30 @@ document.addEventListener("DOMContentLoaded", () => {
             list.innerHTML = `<li class="proc-item"><span class="proc-name">-</span></li>`;
             return;
         }
+        // Built with textContent, not innerHTML: a process name is attacker
+        // controlled (any local user can name a binary "<svg onload=...>") and
+        // this list is re-rendered every 2.5s.
         processes.forEach((proc, index) => {
             const li = document.createElement("li");
             li.className = "proc-item";
-            li.innerHTML = `
-                <span class="proc-rank">${index + 1}</span>
-                <span class="proc-name">${proc.name}</span>
-                <span class="proc-cpu">${proc.cpu}%</span>
-                <span class="proc-mem">${proc.mem}%</span>
-            `;
+            [
+                ["proc-rank", String(index + 1)],
+                ["proc-name", proc.name],
+                ["proc-cpu", `${proc.cpu}%`],
+                ["proc-mem", `${proc.mem}%`]
+            ].forEach(([cls, value]) => {
+                const span = document.createElement("span");
+                span.className = cls;
+                span.textContent = value;
+                li.appendChild(span);
+            });
             list.appendChild(li);
         });
     }
 
     async function updateLiveStats() {
         try {
-            const res = await fetch("/api/stats");
+            const res = await apiFetch("/api/stats");
             if (!res.ok) throw new Error("Error al obtener estadísticas en vivo");
             const data = await res.json();
 
@@ -614,7 +645,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function closeTerminalModal() {
         stopTerminalStream();
-        fetch("/api/terminal/stop", { method: "POST" }).catch(() => {});
+        apiFetch("/api/terminal/stop", { method: "POST" }).catch(() => {});
         terminalBodyEl.innerHTML = "";
         terminalOutputPre = null;
         terminalModal.style.display = "none";
@@ -650,7 +681,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function connectTerminalStream() {
         stopTerminalStream();
         terminalInteractive = true;
-        terminalEventSource = new EventSource("/api/terminal/events");
+        terminalEventSource = new EventSource(`/api/terminal/events?token=${encodeURIComponent(API_TOKEN)}`);
         terminalEventSource.onmessage = event => {
             let msg;
             try { msg = JSON.parse(event.data); } catch { return; }
@@ -666,7 +697,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function sendTerminalInput(data) {
-        fetch("/api/terminal/input", {
+        apiFetch("/api/terminal/input", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ data })
@@ -681,7 +712,7 @@ document.addEventListener("DOMContentLoaded", () => {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Preparando...';
         try {
-            const res = await fetch("/api/terminal/start", {
+            const res = await apiFetch("/api/terminal/start", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action })
@@ -705,7 +736,7 @@ document.addEventListener("DOMContentLoaded", () => {
     shutdownBtn.addEventListener("click", async () => {
         if (confirm(currentLanguage === "es" ? "¿Estás seguro de que deseas apagar el analizador? Esto detendrá el servidor backend." : "Are you sure you want to stop the analyzer? This will stop the backend server.")) {
             try {
-                await fetch("/api/shutdown", { method: "POST" });
+                await apiFetch("/api/shutdown", { method: "POST" });
                 document.body.innerHTML = `
                     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: var(--bg-dark); color: var(--text-primary); font-family: var(--font-sans);">
                         <i class="fa-solid fa-power-off" style="font-size: 4rem; color: var(--danger); margin-bottom: 1.5rem;"></i>

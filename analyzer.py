@@ -566,7 +566,8 @@ def get_disk_info():
 
             health = None
             if shutil.which("smartctl"):
-                health_out, health_code = run_cmd(f"smartctl -H /dev/{name} 2>/dev/null", timeout=4)
+                device = shlex.quote(f"/dev/{name}")
+                health_out, health_code = run_cmd(f"smartctl -H {device} 2>/dev/null", timeout=4)
                 if health_code == 0:
                     for hline in health_out.splitlines():
                         if "PASSED" in hline:
